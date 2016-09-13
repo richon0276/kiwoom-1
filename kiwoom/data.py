@@ -1,4 +1,5 @@
 from logger import MyLogger
+import collections
 
 
 class Balance:
@@ -28,43 +29,87 @@ class Balance:
 
     @staticmethod
     def get_available_sell_strategy():
-        return ["sell_stop_loss", "sell_condition_sell"]
+        return ["sell_stop_loss", "sell_condition_sell", "sell_on_closing"]
 
     def get_str_list(self):
         return [self.종목코드, self.종목명, str(self.현재가), str(self.매입가), str(self.보유수량), str(self.목표보유수량), str(self.수익률), str(list(self.매수전략.keys())), str(list(self.매도전략.keys()))]
 
+    def get_dic(self):
+        ret = {}
+        ret["종목코드"] = self.종목코드
+        ret["종목명"] = self.종목명
+        ret["목표보유수량"] = self.목표보유수량
+        매수전략_dic = {}
+        for k, v in self.매수전략.items():
+            매수전략_dic[k] = v.get_current_param()
+        매도전략_dic = {}
+        for k, v in self.매도전략.items():
+            매도전략_dic[k] = v.get_current_param()
+        ret["매수전략_dic"] = 매수전략_dic
+        ret["매도전략_dic"] = 매도전략_dic
+        return ret
+
+    def get_return_rate(self):
+        if not self.매입가:
+            return 0
+
+        # 매수수수료 = 매입금액 * 매체수수료(0.015 %)(10 원미만 절사)
+        매수수수료 = (self.매입가 * self.보유수량) * 0.00015
+        매수수수료 = int(매수수수료 // 10) * 10  # (10원 미만 절사)
+
+        # 매도수수료 = 현재가 * 수량 * 매체수수료(0.015 %)(10 원미만 절사)
+        매도수수료 = self.현재가 * self.보유수량 * 0.00015
+        매도수수료 = int(매도수수료 // 10) * 10  # (10원 미만 절사)
+
+        # 제세금 = 현재가 * 수량 * 0.3 % (원미만 절사)
+        세금 = int(self.현재가 * self.보유수량 * 0.003)
+
+        # 평가금액 = (현재가 * 수량) - 매수가계산 수수료 - 매도가계산 수수료 - 제세금 가계산
+        평가금액 = (self.현재가 * self.보유수량) - 매수수수료 - 매도수수료 - 세금
+
+        # 평가손익 = 평가금액 - 매입금액
+        평가손익 = 평가금액 - (self.매입가 * self.보유수량)
+
+        # 수익률 = 평가손익 / 매입금액
+        수익률 = 평가손익 / (self.매입가 * self.보유수량)
+
+        return 수익률
+
     def print(self):
         MyLogger.instance().logger().info("\t\t%s", self.get_str_list())
 
-    def add_buy_strategy(self, the_전략명):
+    def add_buy_strategy(self, the_전략명, the_param_dic):
         from kiwoom.strategy.just_buy import JustBuy
         from kiwoom.strategy.buy_on_opening import BuyOnOpening
-        if the_전략명 not in self.매수전략:
-            if the_전략명 == "buy_just_buy":
-                buy_just_buy = JustBuy(self)
-                self.매수전략[the_전략명] = buy_just_buy
-                MyLogger.instance().logger().info("buy_just_buy 추가됨. %s", self.종목명)
-            elif the_전략명 == "buy_on_opening":
-                buy_on_opening = BuyOnOpening(self)
-                self.매수전략[the_전략명] = buy_on_opening
-                MyLogger.instance().logger().info("buy_on_opening 추가됨. %s", self.종목명)
-            else:
-                MyLogger.instance().logger().warning("unknown strategy. ignore %s. %s", the_전략명, self.종목명)
+        if the_전략명 == "buy_just_buy":
+            buy_just_buy = JustBuy(self, the_param_dic)
+            self.매수전략[the_전략명] = buy_just_buy
+            MyLogger.instance().logger().info("buy_just_buy 추가됨. %s", self.종목명)
+        elif the_전략명 == "buy_on_opening":
+            buy_on_opening = BuyOnOpening(self, the_param_dic)
+            self.매수전략[the_전략명] = buy_on_opening
+            MyLogger.instance().logger().info("buy_on_opening 추가됨. %s", self.종목명)
+        else:
+            MyLogger.instance().logger().warning("unknown strategy. ignore %s. %s", the_전략명, self.종목명)
 
-    def add_sell_strategy(self, the_전략명):
+    def add_sell_strategy(self, the_전략명, the_param_dic):
         from kiwoom.strategy.stop_loss import StopLoss
         from kiwoom.strategy.condition_sell import ConditionSell
-        if the_전략명 not in self.매도전략:
-            if the_전략명 == "sell_stop_loss":
-                sell_stop_loss = StopLoss(self)
-                self.매도전략[the_전략명] = sell_stop_loss
-                MyLogger.instance().logger().info("sell_stop_loss 추가됨. %s", self.종목명)
-            elif the_전략명 == "sell_condition_sell":
-                sell_condition_sell = ConditionSell(self)
-                self.매도전략[the_전략명] = sell_condition_sell
-                MyLogger.instance().logger().info("sell_condition_sell 추가됨. %s", self.종목명)
-            else:
-                MyLogger.instance().logger().wanning("unknown strategy. ignore %s. %s", the_전략명, self.종목명)
+        from kiwoom.strategy.sell_on_closing import SellOnClosing
+        if the_전략명 == "sell_stop_loss":
+            sell_stop_loss = StopLoss(self, the_param_dic)
+            self.매도전략[the_전략명] = sell_stop_loss
+            MyLogger.instance().logger().info("sell_stop_loss 추가됨. %s", self.종목명)
+        elif the_전략명 == "sell_condition_sell":
+            sell_condition_sell = ConditionSell(self, the_param_dic)
+            self.매도전략[the_전략명] = sell_condition_sell
+            MyLogger.instance().logger().info("sell_condition_sell 추가됨. %s", self.종목명)
+        elif the_전략명 == "sell_on_closing":
+            sell_on_closing = SellOnClosing(self, the_param_dic)
+            self.매도전략[the_전략명] = sell_on_closing
+            MyLogger.instance().logger().info("sell_on_closing 추가됨. %s", self.종목명)
+        else:
+            MyLogger.instance().logger().wanning("unknown strategy. ignore %s. %s", the_전략명, self.종목명)
 
 
 class Condition:
@@ -96,8 +141,8 @@ class Condition:
 class Data:
     계좌번호 = "12345"
     계좌번호_list = ["12345", "23456"]
-    조건식_dic = {}  # {0: Condition(0), 1: Condition(1)}
-    잔고_dic = {}  # {"00000": Balance("00000"), "00001": Balance("00001")}
+    조건식_dic = collections.OrderedDict()  # {0: Condition(0), 1: Condition(1)}
+    잔고_dic = collections.OrderedDict()  # {"00000": Balance("00000"), "00001": Balance("00001")}
 
     def print(self):
         MyLogger.instance().logger().info("============= current data ==============")
